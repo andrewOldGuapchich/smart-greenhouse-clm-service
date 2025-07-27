@@ -1,0 +1,97 @@
+server:
+  port: 20100
+  connection-timeout: 60s
+#  servlet:
+#    context-path: /smart-greenhouse/auth-service/api
+  tomcat:
+    accept-count: 100
+    max-connections: 10000
+
+
+spring:
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.r2dbc.R2dbcAutoConfiguration
+  application:
+    name: greenhouse-clm
+  datasource:
+    url: jdbc:postgresql://localhost:5432/clm_db
+    username: garden
+    password: garden
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+      type:
+        prefer_basic_type_registration: true
+    show-sql: true
+
+#  mail:
+#    host: smtp.yandex.ru
+#    port: 587
+#    username: ChromayKonyshka
+#    password: xhbmeictzjihsizr
+#    properties:
+#      mail:
+#        smtp:
+#          auth: true
+#          starttls:
+
+#            enabled: true
+#            required: true
+#redis config
+#  data:
+#    redis:
+#      host: localhost
+#      port: 6379
+#      timeout: 6000ms
+#      lettuce:
+#        pool:
+#          max-active: 8
+#          max-idle: 8
+#          min-idle: 0
+#          max-wait: 10000ms
+#kafka config
+#  kafka:
+#    bootstrap-servers: localhost:9092
+#    producer:
+#      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+#      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+#      properties:
+#        spring.json.add.type.headers: false
+#        acks: all
+#    consumer:
+#      group-id: otp-group
+#      auto-offset-reset: earliest
+#      enable-auto-commit: true
+#      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+#      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+#      properties:
+#        spring.json.trusted.packages: "*"
+
+#
+logging:
+  level:
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+#    root: DEBUG
+    org.springframework.web: TRACE
+#    org.apache.kafka.clients: INFO
+#
+#eureka:
+#  client:
+#    service-url:
+#      defaultZone: http://localhost:8761/eureka/
+
+jwt:
+  token:
+    secret:
+      access: 984hg493gh0439rthr0429uruj2309yh937gc763fe87t3f89723gf
+    duration: 600
+
+#SMTP Config
+#smtp:
+#  mail:
+#    name: i@andrewkononov.ru
+
+rest:
+  base-url: localhost
