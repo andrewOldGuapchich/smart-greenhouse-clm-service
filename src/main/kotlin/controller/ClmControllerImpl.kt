@@ -1,7 +1,6 @@
 package com.andrew.smart_greenhouse.clm.controller
 
-import greenhouse_api.clm_controller.ClmController
-import greenhouse_api.clm_controller.model.ClmControllerRequestDto
+import greenhouse_api.clm_controller.ClmControllerRequestDto
 import greenhouse_api.clm_model.model.ClmClientActivationRequest
 import greenhouse_api.clm_model.model.ClmClientCreateRequest
 import greenhouse_api.clm_model.model.ClmClientUpdateRequest
@@ -23,7 +22,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/smart-greenhouse/internal/clm/api")
 class ClmControllerImpl @Autowired constructor(
     val clientService: ClientService
-) : ClmController {
+) {
     @PostMapping("/v1/clients")
     fun createClmClient(
         @RequestHeader

@@ -1,9 +1,11 @@
 package com.andrew.smart_greenhouse.clm.service.impl
 
+import clam_model.dto.*
 import com.andrew.smart_greenhouse.clm.repository.ClientRepository
 import com.andrew.smart_greenhouse.clm.service.mapper.client_mapper.ClientMapper.Companion.createResponse
 import com.andrew.smart_greenhouse.clm.util.exception.ClmException
-import greenhouse_api.clm_controller.model.ClmControllerRequestDto
+import com.andrew.smart_greenhouse.clm.util.rest.ClmRestClient
+import greenhouse_api.clm_controller.*
 import greenhouse_api.clm_model.entity.Client
 import greenhouse_api.clm_model.model.*
 import greenhouse_api.clm_service.ClientService
@@ -17,6 +19,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.stereotype.Service
 import util.ExternalIdGenerator.Companion.generateNextExtId
+import util.http.RestHandler
 
 @Service
 class ClientServiceImpl @Autowired constructor(
@@ -24,6 +27,7 @@ class ClientServiceImpl @Autowired constructor(
     private val regionService: RegionService,
     private val deviceService: DeviceService,
     private val entityManager: EntityManager,
+    private val restClient: ClmRestClient
 ): ClientService {
     override fun createClient(req: ClmControllerRequestDto): ResponseEntity<ClmResponse> {
         val headers = req.headers
@@ -43,10 +47,33 @@ class ClientServiceImpl @Autowired constructor(
                 regionService.findRegionByName(it)
             }
             client.externalId = resolveExtId()
-            save(client)
+
+            val savedClient = save(client)
 
             //send streaming message on kafka: pub.clm-outgoing
-            //send http req to CLAM
+
+            val rs = restClient.createClientSendReq(ClamClientCreateRequest().apply {
+                personalInfo = PersonalInfoDTO().apply {
+                    login = client.login
+                    email = client.emailAddress
+                    externalId = client.externalId
+                }
+                cred = CredentialDTO().apply {
+                    password = reqBody.credential.password
+                    passwordConfirm = reqBody.credential.passwordConfirm
+                }
+            })
+
+            if(rs.first != HttpStatus.OK) {
+                savedClient.amndState = AmndState.INACTIVE
+                save(savedClient)
+                return ResponseEntity.badRequest().body(
+                    ClmBadResponse().apply {
+                        message = (rs.second as ClamStatusResponse).message
+                        status = HttpStatus.BAD_REQUEST.value()
+                    }
+                )
+            }
 
             return ResponseEntity.ok().body(
                 ClmOkResponse().apply{
@@ -279,7 +306,7 @@ class ClientServiceImpl @Autowired constructor(
         }
     }
 
-    fun Client.copyClient(state: AmndState, act: ClientAction): Client {
+    private fun Client.copyClient(state: AmndState, act: ClientAction): Client {
         return Client().apply {
             amndState = state
             externalId = this@copyClient.externalId

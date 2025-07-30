@@ -75,6 +75,7 @@ logging:
     org.hibernate.type.descriptor.sql.BasicBinder: TRACE
 #    root: DEBUG
     org.springframework.web: TRACE
+    org.springframework.web.reactive.function.client: TRACE
 #    org.apache.kafka.clients: INFO
 #
 #eureka:
@@ -95,3 +96,4 @@ jwt:
 
 rest:
   base-url: localhost
+  base-prefix: /smart-greenhouse/internal

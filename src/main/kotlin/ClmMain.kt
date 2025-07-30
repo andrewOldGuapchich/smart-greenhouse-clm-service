@@ -7,7 +7,7 @@ import org.springframework.boot.runApplication
 @SpringBootApplication
 @EntityScan("greenhouse_api.clm_model.entity")
 //@EnableDiscoveryClient
-class AuthenticationMain
+class ClmMain
 fun main(args: Array<String>){
-    runApplication<AuthenticationMain>(*args)
+    runApplication<ClmMain>(*args)
 }
