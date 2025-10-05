@@ -28,12 +28,15 @@ dependencies {
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
     implementation("org.springframework.boot:spring-boot-starter-validation")
-    //implementation("org.springframework.kafka:spring-kafka:3.3.3")
+    implementation("org.springframework.kafka:spring-kafka:3.3.8")
+    implementation("com.google.protobuf:protobuf-java:4.28.2")
+    implementation("com.google.protobuf:protobuf-kotlin:4.28.2")
     //implementation("org.springframework.cloud:spring-cloud-starter-netflix-eureka-client")
     implementation("com.andrew.greenhouse.api:clm-api:1.0-SNAPSHOT")
     implementation("com.andrew.greenhouse.api:clam-api:1.0-SNAPSHOT")
     implementation("com.andrew.greenhouse.util:greenhouse-util:1.0-SNAPSHOT")
     runtimeOnly("org.postgresql:postgresql")
+    implementation(kotlin("stdlib-jdk8"))
 }
 
 tasks.test {

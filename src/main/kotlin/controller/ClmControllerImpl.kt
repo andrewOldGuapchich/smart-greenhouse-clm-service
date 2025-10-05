@@ -1,10 +1,7 @@
 package com.andrew.smart_greenhouse.clm.controller
 
 import greenhouse_api.clm_controller.ClmControllerRequestDto
-import greenhouse_api.clm_model.model.ClmClientActivationRequest
-import greenhouse_api.clm_model.model.ClmClientCreateRequest
-import greenhouse_api.clm_model.model.ClmClientUpdateRequest
-import greenhouse_api.clm_model.model.ClmResponse
+import greenhouse_api.clm_model.model.*
 import greenhouse_api.clm_service.ClientService
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.ResponseEntity
@@ -35,15 +32,17 @@ class ClmControllerImpl @Autowired constructor(
         )
     }
 
-    @PostMapping("/v1/clients/activate")
+    @PostMapping("/v1/clients/{client-id}/activate")
     fun activateClmClient(
         @RequestHeader
         httpHeaders: Map<String, String>,
+        @PathVariable("client-id")
+        clientId: String,
         @RequestBody
         req: ClmClientActivationRequest
     ) : ResponseEntity<ClmResponse> {
         return clientService.activateClmClient(
-            req = ClmControllerRequestDto(headers = httpHeaders, body = req)
+            req = ClmControllerRequestDto(headers = httpHeaders, queryPathVariable = mapOf("client-id" to clientId), body = req)
         )
     }
 
@@ -61,6 +60,24 @@ class ClmControllerImpl @Autowired constructor(
         )
     }
 
+    @PostMapping("/v1/clients/{client-id}/status")
+    fun setClientStatus(
+        @RequestHeader
+        httpHeaders: Map<String, String>,
+        @PathVariable("client-id")
+        clientId: String,
+        @RequestBody
+        req: ClmClientSetStatus
+    ): ResponseEntity<ClmResponse> {
+        return clientService.setClientStatus(
+            req = ClmControllerRequestDto(
+                headers = httpHeaders,
+                queryPathVariable = mapOf("client-id" to clientId),
+                body = req
+            )
+        )
+    }
+
     @DeleteMapping("/v1/clients/{client-id}")
     fun deleteClmClient(
         @RequestHeader
@@ -69,7 +86,8 @@ class ClmControllerImpl @Autowired constructor(
         clientId: String
     ) : ResponseEntity<ClmResponse> {
         return clientService.deleteClmClient(
-            req = ClmControllerRequestDto(headers = httpHeaders, queryPathVariable = mapOf("client-id" to clientId)
+            req = ClmControllerRequestDto(
+                headers = httpHeaders, queryPathVariable = mapOf("client-id" to clientId)
             )
         )
     }

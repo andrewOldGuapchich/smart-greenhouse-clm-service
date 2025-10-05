@@ -22,13 +22,20 @@ interface ClientRepository : JpaRepository<Client, Long>{
         @Param("states") states: List<AmndState>
     ) : Client?
 
-    @Query("SELECT c FROM Client c WHERE c.login=:login and c.amndState='WAITING' and c.action=:action")
+    @Query("SELECT c FROM Client c WHERE c.id=:id and c.amndState='WAITING' and c.action=:action")
     fun findWaitingClient(
-        @Param("login") login: String,
+        @Param("id") id: String,
         @Param("action") action: ClientAction
     ): Client?
 
-    @Query("SELECT c FROM Client c where c.externalId=:clientId and c.amndState='ACTIVE'")
+    @Query("SELECT c FROM Client c WHERE c.id=:id and c.amndState='WAITING' and c.amndState IN :states and c.action=:action")
+    fun findClientById(
+        @Param("id") id: String,
+        @Param("action") action: ClientAction,
+        @Param("states") states: List<AmndState>
+    ): Client?
+
+    @Query("SELECT c FROM Client c where c.id=:clientId and c.amndState='ACTIVE'")
     fun findByClientId(
         @Param("clientId") clientId: String
     ): Client?

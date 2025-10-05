@@ -10,7 +10,7 @@ import org.springframework.stereotype.Repository
 interface DeviceRepository : JpaRepository<Device, Long>{
     @Query(
         nativeQuery = true,
-        value = "SELECT * FROM clm_device WHERE client_id = :externalId AND amnd_state = 'ACTIVE'"
+        value = "SELECT * FROM clm_device WHERE client_id = :id AND amnd_state = 'ACTIVE'"
     )
-    fun getDevicesByClientExternalId(@Param("externalId") externalId: String): List<Device>
+    fun getDevicesByClientExternalId(@Param("id") id: String): List<Device>
 }

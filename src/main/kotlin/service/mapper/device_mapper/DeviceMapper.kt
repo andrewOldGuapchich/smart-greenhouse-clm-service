@@ -15,8 +15,7 @@ class DeviceMapper {
         private fun createDeviceInfoBase(device: Device): DeviceInfo {
             return DeviceBase().apply {
                 deviceId = Id().apply {
-                    id = device.id
-                    externalId = device.externalId
+                    clientId = device.id
                 }
                 serialNumber = device.serialNumber
                 type = device.deviceType

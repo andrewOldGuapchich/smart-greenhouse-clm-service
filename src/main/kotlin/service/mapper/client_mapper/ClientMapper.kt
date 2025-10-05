@@ -14,14 +14,15 @@ class ClientMapper {
         private fun createDtoFromClient(client: Client): ClmResponse {
             return ClmClientGetResponse().apply {
                 id = Id().apply {
-                    id = client.id
-                    externalId = client.externalId
+                    clientId = client.id
                 }
                 login = client.login
                 personalInfo = PersonalInfo.PersonalInfoCreate().apply {
                     name = client.name
                     surname = client.surname
-                    patronymic = client.patronymic
+                    client.patronymic?.let{
+                        patronymic = it
+                    }
                     birthDate = client.birthDate
                 }
                 contacts = Contacts.ContactsCreate().apply {

@@ -10,23 +10,21 @@ import greenhouse_api.clm_model.entity.Client
 import greenhouse_api.clm_model.model.*
 import greenhouse_api.clm_service.ClientService
 import greenhouse_api.clm_service.DeviceService
+import greenhouse_api.clm_service.GeneratorService
 import greenhouse_api.clm_service.RegionService
 import greenhouse_api.util.*
-import jakarta.persistence.EntityManager
 import jakarta.transaction.Transactional
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.stereotype.Service
-import util.ExternalIdGenerator.Companion.generateNextExtId
-import util.http.RestHandler
 
 @Service
 class ClientServiceImpl @Autowired constructor(
     private val clientRepository: ClientRepository,
     private val regionService: RegionService,
     private val deviceService: DeviceService,
-    private val entityManager: EntityManager,
+    private val generatorService: GeneratorService,
     private val restClient: ClmRestClient
 ): ClientService {
     override fun createClient(req: ClmControllerRequestDto): ResponseEntity<ClmResponse> {
@@ -36,7 +34,7 @@ class ClientServiceImpl @Autowired constructor(
             if (clientRepository.findClientByLogin(reqBody.login, listOf(AmndState.ACTIVE, AmndState.WAITING)) != null
                 || clientRepository.findClientByEmail(reqBody.contacts.email, listOf(AmndState.ACTIVE, AmndState.WAITING) ) != null) {
                 return ResponseEntity.badRequest().body(
-                    ClmBadResponse().apply {
+                    ClmStatusResponse().apply {
                         message = RegisterResponseMessageCode.ALREADY_EXISTS.toString()
                         status = HttpStatus.BAD_REQUEST.value()
                     }
@@ -46,17 +44,17 @@ class ClientServiceImpl @Autowired constructor(
             client.region = reqBody.location?.region?.let {
                 regionService.findRegionByName(it)
             }
-            client.externalId = resolveExtId()
+            client.id = calculateNewClientId()
 
             val savedClient = save(client)
 
             //send streaming message on kafka: pub.clm-outgoing
-
-            val rs = restClient.createClientSendReq(ClamClientCreateRequest().apply {
+            val rs = restClient.createClamClientSendReq(ClamClientCreateRequest().apply {
                 personalInfo = PersonalInfoDTO().apply {
                     login = client.login
                     email = client.emailAddress
-                    externalId = client.externalId
+                    //edit
+                    id = client.id
                 }
                 cred = CredentialDTO().apply {
                     password = reqBody.credential.password
@@ -76,15 +74,24 @@ class ClientServiceImpl @Autowired constructor(
             }
 
             return ResponseEntity.ok().body(
-                ClmOkResponse().apply{
+                ClmClientCreateResponse().apply{
+                    clientId = client.id
                     message = RegisterResponseMessageCode.WAITING_ACTIVATION_CODE.toString()
                     status = HttpStatus.OK.value()
+                    generatorService.updateCurrentId()
                 }
             )
-        } catch (exception: RuntimeException) {
+        } catch (exception: ClmException) {
             return ResponseEntity.internalServerError().body(
-                ClmBadResponse().apply {
-                    message = ClientActionMessageCode.INTERNAL_ERROR.toString()
+                ClmStatusResponse().apply {
+                    message = exception.message!!
+                    status = HttpStatus.BAD_REQUEST.value()
+                }
+            )
+        } catch (exception: Exception) {
+            return ResponseEntity.internalServerError().body(
+                ClmStatusResponse().apply {
+                    message = "${ClientActionMessageCode.INTERNAL_ERROR}\n${exception.message}"
                     status = HttpStatus.INTERNAL_SERVER_ERROR.value()
                 }
             )
@@ -94,9 +101,14 @@ class ClientServiceImpl @Autowired constructor(
     override fun activateClmClient(req: ClmControllerRequestDto): ResponseEntity<ClmResponse> {
         try {
             val reqBody = req.body as ClmClientActivationRequest
-            val waitingClient = clientRepository.findWaitingClient(reqBody.login, reqBody.clientAction)
+            val clientId = req.queryPathVariable["client-id"]!!
+            val waitingClient = clientRepository.findClientById(
+                id = clientId,
+                action = ClientAction.CREATE,
+                states = listOf(AmndState.WAITING)
+            )
                 ?: return ResponseEntity.badRequest().body(
-                    ClmBadResponse().apply {
+                    ClmStatusResponse().apply {
                         message = ClientActionMessageCode.CLIENT_NOT_FOUND.toString()
                         status = HttpStatus.BAD_REQUEST.value()
                     }
@@ -112,7 +124,7 @@ class ClientServiceImpl @Autowired constructor(
 
             return if(otp != reqBody.verifyCode)
                 ResponseEntity.badRequest().body(
-                    ClmBadResponse().apply {
+                    ClmStatusResponse().apply {
                         message = ClientActionMessageCode.CODE_MATCH_ERROR.toString()
                         status = HttpStatus.BAD_REQUEST.value()
                     }
@@ -124,15 +136,23 @@ class ClientServiceImpl @Autowired constructor(
                     ClientAction.DELETE -> waitingClient.copyClient(AmndState.CLOSED, ClientAction.DELETE)
                 }
                 save(activeClient)
+                restClient.activateClamClientSendReq(activeClient.id)
                 //send kafka-message on CLAM, CDM, NTM, MEAM
                 ResponseEntity.ok().body(
                     activeClient.createResponse()
                 )
             }
-        } catch (e: Exception) {
+        } catch (exception: ClmException) {
             return ResponseEntity.internalServerError().body(
-                ClmBadResponse().apply {
-                    message = ClientActionMessageCode.INTERNAL_ERROR.toString()
+                ClmStatusResponse().apply {
+                    message = exception.message!!
+                    status = HttpStatus.BAD_REQUEST.value()
+                }
+            )
+        } catch (exception: Exception) {
+            return ResponseEntity.internalServerError().body(
+                ClmStatusResponse().apply {
+                    message = "${ClientActionMessageCode.INTERNAL_ERROR}\n${exception.message}"
                     status = HttpStatus.INTERNAL_SERVER_ERROR.value()
                 }
             )
@@ -146,7 +166,7 @@ class ClientServiceImpl @Autowired constructor(
                 ?: throw ClmException(message = "The client-id header is missing!")
             val client = clientRepository.findByClientId(clientId)
                 ?: return ResponseEntity.badRequest().body(
-                    ClmBadResponse().apply {
+                    ClmStatusResponse().apply {
                         message = ClientActionMessageCode.CLIENT_NOT_FOUND.toString()
                         status = HttpStatus.BAD_REQUEST.value()
                     }
@@ -156,16 +176,22 @@ class ClientServiceImpl @Autowired constructor(
 
             //send streaming message on kafka: pub.clm-outgoing
             return ResponseEntity.ok().body(
-                ClmOkResponse().apply {
+                ClmStatusResponse().apply {
                     message = RegisterResponseMessageCode.WAITING_ACTIVATION_CODE.toString()
                     status = HttpStatus.OK.value()
                 }
             )
-        } catch (e: Exception) {
-            println(e.message)
-            return ResponseEntity.badRequest().body(
-                ClmBadResponse().apply {
-                    message = ClientActionMessageCode.INTERNAL_ERROR.toString()
+        } catch (exception: ClmException) {
+            return ResponseEntity.internalServerError().body(
+                ClmStatusResponse().apply {
+                    message = exception.message!!
+                    status = HttpStatus.BAD_REQUEST.value()
+                }
+            )
+        } catch (exception: Exception) {
+            return ResponseEntity.internalServerError().body(
+                ClmStatusResponse().apply {
+                    message = "${ClientActionMessageCode.INTERNAL_ERROR}\n${exception.message}"
                     status = HttpStatus.INTERNAL_SERVER_ERROR.value()
                 }
             )
@@ -178,7 +204,7 @@ class ClientServiceImpl @Autowired constructor(
                 ?: throw ClmException(message = "The client-id header is missing!")
             val client = clientRepository.findByClientId(clientId)
                 ?: return ResponseEntity.badRequest().body(
-                    ClmBadResponse().apply {
+                    ClmStatusResponse().apply {
                         message = ClientActionMessageCode.CLIENT_NOT_FOUND.toString()
                         status = HttpStatus.BAD_REQUEST.value()
                     }
@@ -186,11 +212,17 @@ class ClientServiceImpl @Autowired constructor(
             return ResponseEntity.ok().body(
                 client.createResponse()
             )
-        } catch (e: Exception) {
-            println(e.message)
-            return ResponseEntity.badRequest().body(
-                ClmBadResponse().apply {
-                    message = ClientActionMessageCode.INTERNAL_ERROR.toString()
+        } catch (exception: ClmException) {
+            return ResponseEntity.internalServerError().body(
+                ClmStatusResponse().apply {
+                    message = exception.message!!
+                    status = HttpStatus.BAD_REQUEST.value()
+                }
+            )
+        } catch (exception: Exception) {
+            return ResponseEntity.internalServerError().body(
+                ClmStatusResponse().apply {
+                    message = "${ClientActionMessageCode.INTERNAL_ERROR}\n${exception.message}"
                     status = HttpStatus.INTERNAL_SERVER_ERROR.value()
                 }
             )
@@ -198,11 +230,11 @@ class ClientServiceImpl @Autowired constructor(
     }
 
     override fun getClmClientWithDevices(req: ClmControllerRequestDto): ResponseEntity<ClmResponse> {
-        val clientId = req.queryPathVariable["client-id"]
+        val id = req.queryPathVariable["client-id"]
             ?: throw ClmException(message = "The client-id header is missing!")
-        val client = clientRepository.findByClientId(clientId)
+        val client = clientRepository.findByClientId(id)
             ?: return ResponseEntity.badRequest().body(
-                ClmBadResponse().apply {
+                ClmStatusResponse().apply {
                     message = ClientActionMessageCode.CLIENT_NOT_FOUND.toString()
                     status = HttpStatus.BAD_REQUEST.value()
                 }
@@ -210,12 +242,49 @@ class ClientServiceImpl @Autowired constructor(
         return ResponseEntity.ok(
             ClmClientDevicesBaseResponse().apply {
                 clientInfo = Id().apply {
-                    id = client.id
-                    externalId = client.externalId
+                    clientId = client.id
                 }
                 devices = deviceService.getClmDevices(client, "base")
             }
         )
+    }
+
+    override fun setClientStatus(req: ClmControllerRequestDto): ResponseEntity<ClmResponse> {
+        val headers = req.headers
+
+        try {
+            val clientId = req.queryPathVariable.resolveClientId()
+            val client = clientRepository.findByClientId(clientId)
+                ?: return ResponseEntity.badRequest().body(
+                    ClmStatusResponse().apply {
+                        message = ClientActionMessageCode.CLIENT_NOT_FOUND.toString()
+                        status = HttpStatus.BAD_REQUEST.value()
+                    }
+                )
+            val reqBody = req.body as ClmClientSetStatus
+
+            val newClient = save(
+                client.copyClient(reqBody.state, reqBody.action)
+            )
+
+            return ResponseEntity.ok().body(
+                newClient.createResponse()
+            )
+        } catch (exception: ClmException) {
+            return ResponseEntity.internalServerError().body(
+                ClmStatusResponse().apply {
+                    message = exception.message!!
+                    status = HttpStatus.BAD_REQUEST.value()
+                }
+            )
+        } catch (exception: Exception) {
+            return ResponseEntity.internalServerError().body(
+                ClmStatusResponse().apply {
+                    message = "${ClientActionMessageCode.INTERNAL_ERROR}\n${exception.message}"
+                    status = HttpStatus.INTERNAL_SERVER_ERROR.value()
+                }
+            )
+        }
     }
 
     override fun updateClmClient(req: ClmControllerRequestDto): ResponseEntity<ClmResponse> {
@@ -225,18 +294,26 @@ class ClientServiceImpl @Autowired constructor(
                 ?: throw ClmException(message = "The client-id header is missing!")
             val client = clientRepository.findByClientId(clientId)
                 ?: return ResponseEntity.badRequest().body(
-                    ClmBadResponse().apply {
+                    ClmStatusResponse().apply {
                         message = ClientActionMessageCode.CLIENT_NOT_FOUND.toString()
                         status = HttpStatus.BAD_REQUEST.value()
                     }
                 )
             //update email
             val reqBody = req.body as ClmClientUpdateRequest
+            val newClient = client.updateClient(reqBody)
+
+            if (newClient == client) {
+                return ResponseEntity.ok().body(
+                    newClient.createResponse()
+                )
+            }
+
             val updateClient = save(client.updateClient(reqBody))
             reqBody.contacts?.email?.let {
                 //send kafka message
                 return ResponseEntity.ok().body(
-                    ClmOkResponse().apply {
+                    ClmStatusResponse().apply {
                         message = RegisterResponseMessageCode.WAITING_ACTIVATION_CODE.toString()
                         status = HttpStatus.OK.value()
                     }
@@ -247,11 +324,17 @@ class ClientServiceImpl @Autowired constructor(
             return ResponseEntity.ok().body(
                 updateClient.createResponse()
             )
-        } catch (e: Exception) {
-            println(e.message)
-            return ResponseEntity.badRequest().body(
-                ClmBadResponse().apply {
-                    message = ClientActionMessageCode.INTERNAL_ERROR.toString()
+        } catch (exception: ClmException) {
+            return ResponseEntity.internalServerError().body(
+                ClmStatusResponse().apply {
+                    message = exception.message!!
+                    status = HttpStatus.BAD_REQUEST.value()
+                }
+            )
+        } catch (exception: Exception) {
+            return ResponseEntity.internalServerError().body(
+                ClmStatusResponse().apply {
+                    message = "${ClientActionMessageCode.INTERNAL_ERROR}\n${exception.message}"
                     status = HttpStatus.INTERNAL_SERVER_ERROR.value()
                 }
             )
@@ -260,13 +343,6 @@ class ClientServiceImpl @Autowired constructor(
 
     @Transactional
     private fun save(client: Client): Client = clientRepository.save(client)
-
-    private fun resolveExtId():String {
-        val next = entityManager
-            .createNativeQuery("SELECT NEXTVAL('id_generator_seq')")
-            .singleResult as Long
-        return next.generateNextExtId("CLM")
-    }
 
     private fun Client.updateClient(updateReq: ClmClientUpdateRequest): Client {
         val updateClient = this.copyClient(AmndState.ACTIVE, ClientAction.UPDATE)
@@ -309,7 +385,7 @@ class ClientServiceImpl @Autowired constructor(
     private fun Client.copyClient(state: AmndState, act: ClientAction): Client {
         return Client().apply {
             amndState = state
-            externalId = this@copyClient.externalId
+            id = this@copyClient.id
             login = this@copyClient.login
             emailAddress = this@copyClient.emailAddress
             surname = this@copyClient.surname
@@ -322,5 +398,25 @@ class ClientServiceImpl @Autowired constructor(
             version = this@copyClient.version + 1
             region = this@copyClient.region
         }
+    }
+
+    private fun calculateNewClientId(): String {
+        val current = generatorService.getCurrentId()
+        val totalNumbers = 10000
+
+        val numberPart = (current % totalNumbers) + 1
+        val letterIndex = current / totalNumbers
+
+        val letter1 = 'A' + (letterIndex / (26 * 26 * 26)) % 26
+        val letter2 = 'A' + (letterIndex / (26 * 26)) % 26
+        val letter3 = 'A' + (letterIndex / 26) % 26
+        val letter4 = 'A' + letterIndex % 26
+
+        return "C-$letter1$letter2$letter3$letter4${"%04d".format(numberPart)}"
+    }
+
+    private fun Map<String, String>.resolveClientId():String {
+        return this["client-id"]
+            ?: throw ClmException(message = "The client-id path param is missing!")
     }
 }

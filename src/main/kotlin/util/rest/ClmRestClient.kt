@@ -1,18 +1,18 @@
 package com.andrew.smart_greenhouse.clm.util.rest
 
 import clam_model.dto.*
+import com.andrew.smart_greenhouse.clm.util.exception.ClmException
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import org.aspectj.lang.ProceedingJoinPoint
-import org.aspectj.lang.annotation.Around
-import org.aspectj.lang.annotation.Aspect
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import util.http.HttpResponse
+import util.http.PathAware
+import util.http.RequestPath
 import util.http.RestHandler
 
 @Component
@@ -27,8 +27,8 @@ class ClmRestClient @Autowired constructor(
         disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
     }
 
-    @PathHandler(path = "/clam/api/v1/clients")
-    fun createClientSendReq(rq: ClamRequest): Pair<HttpStatus, ClamResponse?> {
+    @RequestPath(value = "/clam/api/v1/clients")
+    fun createClamClientSendReq(rq: ClamRequest): Pair<HttpStatus, ClamResponse?> {
         try {
             val rs = restHandler.post<ClamRequest> {
                 endpoint = "$prefix$currentPath"
@@ -44,29 +44,25 @@ class ClmRestClient @Autowired constructor(
         }
     }
 
+    @RequestPath(value = "/clam/api/v1/clients/{client-id}/activate")
+    fun activateClamClientSendReq(clientId: String): Pair<HttpStatus, ClamResponse?> {
+        try {
+            currentPath = currentPath.replace("{client-id}", clientId)
+            val rs = restHandler.post<ClamRequest> {
+                endpoint = pathBuilder()
+                port = 20101
+            }
+            return Pair(
+                first = rs.statusCode,
+                second = resolveBody(rs)
+            )
+        } catch (e: ClmException) {
+            throw ClmException(e.message!!)
+        }
+    }
+
+    private fun pathBuilder(): String = "$prefix$currentPath"
     private fun resolveBody(rs: HttpResponse): ClamResponse? {
         return if(rs.statusCode != HttpStatus.OK) mapper.readValue(rs.body, ClamStatusResponse::class.java) else null
     }
-}
-
-@Target(AnnotationTarget.FUNCTION)
-@Retention(AnnotationRetention.RUNTIME)
-annotation class PathHandler(val path: String)
-
-@Aspect
-@Component
-class PathHandlerAspect {
-    @Around("@annotation(pathHandler)")
-    fun handlePath(joinPoint: ProceedingJoinPoint, pathHandler: PathHandler): Any? {
-        val path = pathHandler.path
-        val target =
-            joinPoint.target as? PathAware ?: return joinPoint.proceed()
-
-        target.currentPath = path
-        return joinPoint.proceed()
-    }
-}
-
-interface PathAware {
-    var currentPath: String
 }

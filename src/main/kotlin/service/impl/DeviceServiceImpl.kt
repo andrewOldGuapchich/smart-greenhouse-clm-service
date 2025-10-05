@@ -13,7 +13,7 @@ class DeviceServiceImpl @Autowired constructor(
     private val deviceRepository: DeviceRepository
 ) : DeviceService{
     override fun getClmDevices(client: Client, mode: String): MutableList<DeviceInfo> {
-        val devices = deviceRepository.getDevicesByClientExternalId(client.externalId)
+        val devices = deviceRepository.getDevicesByClientExternalId(client.id)
             .onEach {it.client = client}
             .map {it.map()}
             .toMutableList()
