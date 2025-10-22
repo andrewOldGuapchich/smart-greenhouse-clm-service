@@ -1,11 +1,41 @@
 package com.andrew.smart_greenhouse.clm.config
 
+import org.apache.kafka.clients.producer.ProducerConfig
+import org.apache.kafka.common.serialization.StringSerializer
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-
+import org.springframework.kafka.core.DefaultKafkaProducerFactory
+import org.springframework.kafka.core.KafkaTemplate
+import org.springframework.kafka.core.ProducerFactory
+import org.springframework.kafka.support.serializer.JsonSerializer
+import util.kafka.producer.KafkaProducer
 @Configuration
-class KafkaConfig {
-    fun kafkaTemplate() {
+class KafkaConfig (
+    @Value("\${kafka.bootstrap-servers}")
+    private val bootstrapServers: String
+){
+    @Bean
+    fun producerFactory(): ProducerFactory<String, Any> {
+        val props = mutableMapOf<String, Any>(
+            ProducerConfig.BOOTSTRAP_SERVERS_CONFIG to bootstrapServers,
+            ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG to StringSerializer::class.java,
+            ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG to JsonSerializer::class.java,
+            ProducerConfig.ACKS_CONFIG to "all", // Гарантия доставки
+            ProducerConfig.RETRIES_CONFIG to 3,
+            ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION to 1,
+            ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG to true, // Идемпотентность
+        )
+        return DefaultKafkaProducerFactory(props)
+    }
 
+    @Bean
+    fun kafkaTemplate(): KafkaTemplate<String, Any> {
+        return KafkaTemplate(producerFactory())
+    }
+
+    @Bean
+    fun kafkaProducer(): KafkaProducer {
+        return KafkaProducer(kafkaTemplate())
     }
 }

@@ -1,23 +1,26 @@
 package com.andrew.smart_greenhouse.clm.service.impl
 
 import clam_model.dto.*
+import clm.AmndStateStreaming
+import clm.ClientInfo
+import clm.CreateClientStreaming
 import com.andrew.smart_greenhouse.clm.repository.ClientRepository
 import com.andrew.smart_greenhouse.clm.service.mapper.client_mapper.ClientMapper.Companion.createResponse
 import com.andrew.smart_greenhouse.clm.util.exception.ClmException
 import com.andrew.smart_greenhouse.clm.util.rest.ClmRestClient
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import greenhouse_api.clm_controller.*
 import greenhouse_api.clm_model.entity.Client
 import greenhouse_api.clm_model.model.*
-import greenhouse_api.clm_service.ClientService
-import greenhouse_api.clm_service.DeviceService
-import greenhouse_api.clm_service.GeneratorService
-import greenhouse_api.clm_service.RegionService
+import greenhouse_api.clm_service.*
 import greenhouse_api.util.*
 import jakarta.transaction.Transactional
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.stereotype.Service
+import util.kafka.producer.KafkaProducer
 
 @Service
 class ClientServiceImpl @Autowired constructor(
@@ -25,9 +28,15 @@ class ClientServiceImpl @Autowired constructor(
     private val regionService: RegionService,
     private val deviceService: DeviceService,
     private val generatorService: GeneratorService,
-    private val restClient: ClmRestClient
+    private val otpService: OtpService,
+    private val restClient: ClmRestClient,
+    private val kafkaProducer: KafkaProducer
 ): ClientService {
-    override fun createClient(req: ClmControllerRequestDto): ResponseEntity<ClmResponse> {
+    private val objectMapper = jacksonObjectMapper().apply {
+        registerModules(JavaTimeModule())
+    }
+
+    override suspend fun createClient(req: ClmControllerRequestDto): ResponseEntity<ClmResponse> {
         val headers = req.headers
         try {
             val reqBody = req.body as ClmClientCreateRequest
@@ -48,7 +57,6 @@ class ClientServiceImpl @Autowired constructor(
 
             val savedClient = save(client)
 
-            //send streaming message on kafka: pub.clm-outgoing
             val rs = restClient.createClamClientSendReq(ClamClientCreateRequest().apply {
                 personalInfo = PersonalInfoDTO().apply {
                     login = client.login
@@ -73,11 +81,48 @@ class ClientServiceImpl @Autowired constructor(
                 )
             }
 
+            val generateOtp = otpService.generateOtp()
+            otpService.saveOtp(savedClient.id, generateOtp)
+
+            val payload = objectMapper.writeValueAsString(
+                CreateClientStreaming(
+                    clientId = savedClient.id,
+                    amndState = AmndStateStreaming.WAITING,
+                    clientInfo = ClientInfo(
+                        login = savedClient.login,
+                        email = savedClient.emailAddress
+                    ),
+                    additionalInfo = mapOf("otp" to generateOtp),
+                    clientVersion = 1
+                )
+            )
+
+            kafkaProducer.send(
+                "clm-outgoing",
+                payload.hashCode().toString(),
+                payload,
+                mapOf("ContentType" to "client-action-request")
+            )
+
             return ResponseEntity.ok().body(
-                ClmClientCreateResponse().apply{
-                    clientId = client.id
-                    message = RegisterResponseMessageCode.WAITING_ACTIVATION_CODE.toString()
-                    status = HttpStatus.OK.value()
+                ClmClientCreateResponse().apply {
+                    id = savedClient.id
+                    status = AmndState.WAITING
+                    login = savedClient.login
+                    personalInfo = PersonalInfo.PersonalInfoCreate().apply {
+                        surname = savedClient.surname
+                        name = savedClient.name
+                        patronymic = savedClient.patronymic
+                        birthDate = savedClient.birthDate
+                    }
+                    contacts = Contacts.ContactsCreate().apply {
+                        phone = savedClient.phoneNumber
+                        email = savedClient.emailAddress
+                    }
+                    location = Location().apply {
+                        region = savedClient.region?.name
+                        city = savedClient.city
+                    }
                     generatorService.updateCurrentId()
                 }
             )
@@ -89,6 +134,7 @@ class ClientServiceImpl @Autowired constructor(
                 }
             )
         } catch (exception: Exception) {
+            exception.printStackTrace()
             return ResponseEntity.internalServerError().body(
                 ClmStatusResponse().apply {
                     message = "${ClientActionMessageCode.INTERNAL_ERROR}\n${exception.message}"
@@ -114,31 +160,51 @@ class ClientServiceImpl @Autowired constructor(
                     }
                 )
 
-            val otp = 1234
-            //getOtp() ?: return ResponseEntity.badRequest().body(
-//            ClmBadResponse(
-//                message = ActivationClientMessageCode.CODE_IS_EXPIRED.toString(),
-//                status = HttpStatus.BAD_REQUEST.value()
-//            )
-//            )
-
-            return if(otp != reqBody.verifyCode)
-                ResponseEntity.badRequest().body(
+            val actualOtp = otpService.findOtp(clientId)
+                ?: return ResponseEntity.badRequest().body(
                     ClmStatusResponse().apply {
-                        message = ClientActionMessageCode.CODE_MATCH_ERROR.toString()
+                        message = ActivationClientMessageCode.CODE_IS_EXPIRED.toString()
                         status = HttpStatus.BAD_REQUEST.value()
                     }
                 )
-            else {
+
+            if(actualOtp != reqBody.verifyCode.toString()) {
+                return ResponseEntity.badRequest().body(
+                    ClmStatusResponse().apply {
+                        message = ActivationClientMessageCode.CODE_MATCH_ERROR.toString()
+                        status = HttpStatus.BAD_REQUEST.value()
+                    }
+                )
+            } else {
                 val activeClient = when (reqBody.clientAction) {
                     ClientAction.CREATE -> waitingClient.copyClient(AmndState.ACTIVE, ClientAction.CREATE)
                     ClientAction.UPDATE -> waitingClient.copyClient(AmndState.ACTIVE, ClientAction.UPDATE)
                     ClientAction.DELETE -> waitingClient.copyClient(AmndState.CLOSED, ClientAction.DELETE)
                 }
                 save(activeClient)
+                otpService.delete(activeClient.id)
                 restClient.activateClamClientSendReq(activeClient.id)
-                //send kafka-message on CLAM, CDM, NTM, MEAM
-                ResponseEntity.ok().body(
+
+                val payload = objectMapper.writeValueAsString(
+                    CreateClientStreaming(
+                        clientId = activeClient.id,
+                        amndState = AmndStateStreaming.ACTIVE,
+                        clientInfo = ClientInfo(
+                            login = activeClient.login,
+                            email = activeClient.emailAddress
+                        ),
+                        clientVersion = activeClient.version
+                    )
+                )
+
+                kafkaProducer.send(
+                    "clm-outgoing",
+                    payload.hashCode().toString(),
+                    payload,
+                    mapOf("ContentType" to "client-action-request")
+                )
+
+                return ResponseEntity.ok().body(
                     activeClient.createResponse()
                 )
             }
@@ -247,6 +313,81 @@ class ClientServiceImpl @Autowired constructor(
                 devices = deviceService.getClmDevices(client, "base")
             }
         )
+    }
+
+    override fun resetClientActivationCode(req: ClmControllerRequestDto): ResponseEntity<ClmResponse> {
+        try {
+            val clientId = req.queryPathVariable["client-id"]!!
+            val waitingClient = clientRepository.findClientById(
+                id = clientId,
+                action = ClientAction.CREATE,
+                states = listOf(AmndState.WAITING)
+            )
+                ?: return ResponseEntity.badRequest().body(
+                    ClmStatusResponse().apply {
+                        message = ClientActionMessageCode.CLIENT_NOT_FOUND.toString()
+                        status = HttpStatus.BAD_REQUEST.value()
+                    }
+                )
+            val generateOtp = otpService.generateOtp()
+            otpService.delete(waitingClient.id)
+            otpService.saveOtp(waitingClient.id, generateOtp)
+
+            val payload = objectMapper.writeValueAsString(
+                CreateClientStreaming(
+                    clientId = waitingClient.id,
+                    amndState = AmndStateStreaming.WAITING,
+                    clientInfo = ClientInfo(
+                        login = waitingClient.login,
+                        email = waitingClient.emailAddress
+                    ),
+                    additionalInfo = mapOf("otp" to generateOtp),
+                    clientVersion = waitingClient.version
+                )
+            )
+
+            kafkaProducer.send(
+                "clm-outgoing",
+                payload.hashCode().toString(),
+                payload,
+                mapOf("ContentType" to "client-action-request")
+            )
+            return ResponseEntity.ok().body(
+                ClmClientCreateResponse().apply {
+                    id = waitingClient.id
+                    status = AmndState.WAITING
+                    login = waitingClient.login
+                    personalInfo = PersonalInfo.PersonalInfoCreate().apply {
+                        surname = waitingClient.surname
+                        name = waitingClient.name
+                        patronymic = waitingClient.patronymic
+                        birthDate = waitingClient.birthDate
+                    }
+                    contacts = Contacts.ContactsCreate().apply {
+                        phone = waitingClient.phoneNumber
+                        email = waitingClient.emailAddress
+                    }
+                    location = Location().apply {
+                        region = waitingClient.region?.name
+                        city = waitingClient.city
+                    }
+                }
+            )
+        } catch (exception: ClmException) {
+            return ResponseEntity.internalServerError().body(
+                ClmStatusResponse().apply {
+                    message = exception.message!!
+                    status = HttpStatus.BAD_REQUEST.value()
+                }
+            )
+        } catch (exception: Exception) {
+            return ResponseEntity.internalServerError().body(
+                ClmStatusResponse().apply {
+                    message = "${ClientActionMessageCode.INTERNAL_ERROR}\n${exception.message}"
+                    status = HttpStatus.INTERNAL_SERVER_ERROR.value()
+                }
+            )
+        }
     }
 
     override fun setClientStatus(req: ClmControllerRequestDto): ResponseEntity<ClmResponse> {
@@ -419,4 +560,5 @@ class ClientServiceImpl @Autowired constructor(
         return this["client-id"]
             ?: throw ClmException(message = "The client-id path param is missing!")
     }
+
 }

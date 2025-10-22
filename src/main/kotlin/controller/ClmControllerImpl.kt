@@ -21,7 +21,7 @@ class ClmControllerImpl @Autowired constructor(
     val clientService: ClientService
 ) {
     @PostMapping("/v1/clients")
-    fun createClmClient(
+    suspend fun createClmClient(
         @RequestHeader
         httpHeaders: Map<String, String>,
         @RequestBody
@@ -75,6 +75,18 @@ class ClmControllerImpl @Autowired constructor(
                 queryPathVariable = mapOf("client-id" to clientId),
                 body = req
             )
+        )
+    }
+
+    @PostMapping("/v1/clients/{client-id}/reset-otp")
+    suspend fun resetClientOtp(
+        @RequestHeader
+        httpHeaders: Map<String, String>,
+        @PathVariable("client-id")
+        clientId: String
+    ) : ResponseEntity<ClmResponse> {
+        return clientService.resetClientActivationCode(
+            req = ClmControllerRequestDto(headers = httpHeaders, queryPathVariable = mapOf("client-id" to clientId))
         )
     }
 

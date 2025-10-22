@@ -30,15 +30,20 @@ class ClmRestClient @Autowired constructor(
     @RequestPath(value = "/clam/api/v1/clients")
     fun createClamClientSendReq(rq: ClamRequest): Pair<HttpStatus, ClamResponse?> {
         try {
+            println("Sending request to: ${pathBuilder()}")
+            println("Request body: ${mapper.writeValueAsString(rq)}")
+
             val rs = restHandler.post<ClamRequest> {
-                endpoint = "$prefix$currentPath"
+                endpoint = pathBuilder()
                 port = 20101
                 requestBody = rq as ClamClientCreateRequest
             }
-            return Pair(
-                first = rs.statusCode,
-                second = resolveBody(rs)
-            )
+            println("Raw response - Status: ${rs.statusCode}, Body: ${rs.body}")
+
+            val resolvedBody = resolveBody(rs)
+            println("Resolved body: $resolvedBody")
+
+            return Pair(rs.statusCode, resolvedBody)
         } catch (e: Exception) {
             throw Exception(e.message)
         }
@@ -62,7 +67,26 @@ class ClmRestClient @Autowired constructor(
     }
 
     private fun pathBuilder(): String = "$prefix$currentPath"
+
     private fun resolveBody(rs: HttpResponse): ClamResponse? {
-        return if(rs.statusCode != HttpStatus.OK) mapper.readValue(rs.body, ClamStatusResponse::class.java) else null
+        return try {
+            when {
+                rs.statusCode.is2xxSuccessful -> {
+                    if (rs.body!!.isNotBlank()) {
+                        mapper.readValue(rs.body, ClamStatusResponse::class.java)
+                    } else {
+                        null
+                    }
+                }
+                else -> {
+                    mapper.readValue(rs.body, ClamStatusResponse::class.java)
+                }
+            }
+        } catch (e: Exception) {
+            ClamStatusResponse().apply {
+                message = "Failed to parse response: ${e.message}"
+                status = rs.statusCode.value()
+            }
+        }
     }
 }
