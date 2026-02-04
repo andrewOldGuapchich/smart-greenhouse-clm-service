@@ -17,7 +17,7 @@ class ClientMapper {
                     clientId = client.id
                 }
                 login = client.login
-                personalInfo = PersonalInfo.PersonalInfoCreate().apply {
+                personalInfo = PersonalInfo().apply {
                     name = client.name
                     surname = client.surname
                     client.patronymic?.let{
@@ -25,7 +25,7 @@ class ClientMapper {
                     }
                     birthDate = client.birthDate
                 }
-                contacts = Contacts.ContactsCreate().apply {
+                contacts = Contacts().apply {
                     phone = client.phoneNumber
                     email = client.emailAddress
                 }

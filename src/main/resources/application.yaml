@@ -63,26 +63,32 @@ eureka:
     fetch-registry: true
   instance:
     hostname: localhost
-    instance-id: ${spring.application.name}:${spring.application.instance_id:${random.value}}
+    instance-id: ${spring.application.name}:${server.port}
     prefer-ip-address: true
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info
-      base-path: /actuator
-  endpoint:
-    health:
-      show-details: always
-    info:
-      enabled: true
-    gateway:
-      enabled: true
-info:
-  app:
-    name: ${spring.application.name}
-    version: 1.0.0
-    description: API Gateway Service
-  environment: development
-  team: Smart Greenhouse Team
+        include: "*"
+
+#management:
+#  endpoints:
+#    web:
+#      exposure:
+#        include: health,info
+#      base-path: /actuator
+#  endpoint:
+#    health:
+#      show-details: always
+#    info:
+#      enabled: true
+#    gateway:
+#      enabled: true
+#info:
+#  app:
+#    name: ${spring.application.name}
+#    version: 1.0.0
+#    description: API Gateway Service
+#  environment: development
+#  team: Smart Greenhouse Team

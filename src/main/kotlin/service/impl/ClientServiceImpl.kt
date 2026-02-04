@@ -8,6 +8,7 @@ import com.andrew.smart_greenhouse.clm.repository.ClientRepository
 import com.andrew.smart_greenhouse.clm.service.mapper.client_mapper.ClientMapper.Companion.createResponse
 import com.andrew.smart_greenhouse.clm.util.exception.ClmException
 import com.andrew.smart_greenhouse.clm.util.rest.ClmRestClient
+import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import greenhouse_api.clm_controller.*
@@ -17,6 +18,7 @@ import greenhouse_api.clm_service.*
 import greenhouse_api.util.*
 import jakarta.transaction.Transactional
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.stereotype.Service
@@ -34,6 +36,7 @@ class ClientServiceImpl @Autowired constructor(
 ): ClientService {
     private val objectMapper = jacksonObjectMapper().apply {
         registerModules(JavaTimeModule())
+        disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
     }
 
     override suspend fun createClient(req: ClmControllerRequestDto): ResponseEntity<ClmResponse> {
@@ -41,7 +44,9 @@ class ClientServiceImpl @Autowired constructor(
         try {
             val reqBody = req.body as ClmClientCreateRequest
             if (clientRepository.findClientByLogin(reqBody.login, listOf(AmndState.ACTIVE, AmndState.WAITING)) != null
-                || clientRepository.findClientByEmail(reqBody.contacts.email, listOf(AmndState.ACTIVE, AmndState.WAITING) ) != null) {
+                || reqBody.contacts.email.let {
+                    clientRepository.findClientByEmail(it, listOf(AmndState.ACTIVE, AmndState.WAITING) )
+                } != null) {
                 return ResponseEntity.badRequest().body(
                     ClmStatusResponse().apply {
                         message = RegisterResponseMessageCode.ALREADY_EXISTS.toString()
@@ -74,7 +79,7 @@ class ClientServiceImpl @Autowired constructor(
                 savedClient.amndState = AmndState.INACTIVE
                 save(savedClient)
                 return ResponseEntity.badRequest().body(
-                    ClmBadResponse().apply {
+                    ClmStatusResponse().apply {
                         message = (rs.second as ClamStatusResponse).message
                         status = HttpStatus.BAD_REQUEST.value()
                     }
@@ -109,13 +114,13 @@ class ClientServiceImpl @Autowired constructor(
                     id = savedClient.id
                     status = AmndState.WAITING
                     login = savedClient.login
-                    personalInfo = PersonalInfo.PersonalInfoCreate().apply {
+                    personalInfo = PersonalInfo().apply {
                         surname = savedClient.surname
                         name = savedClient.name
                         patronymic = savedClient.patronymic
                         birthDate = savedClient.birthDate
                     }
-                    contacts = Contacts.ContactsCreate().apply {
+                    contacts = Contacts().apply {
                         phone = savedClient.phoneNumber
                         email = savedClient.emailAddress
                     }
@@ -183,7 +188,7 @@ class ClientServiceImpl @Autowired constructor(
                 }
                 save(activeClient)
                 otpService.delete(activeClient.id)
-                restClient.activateClamClientSendReq(activeClient.id)
+                val clamResponse = restClient.activateClamClientSendReq(activeClient.id)
 
                 val payload = objectMapper.writeValueAsString(
                     CreateClientStreaming(
@@ -204,7 +209,11 @@ class ClientServiceImpl @Autowired constructor(
                     mapOf("ContentType" to "client-action-request")
                 )
 
-                return ResponseEntity.ok().body(
+                return ResponseEntity.ok()
+                    .headers(HttpHeaders().apply {
+                        set("X-Token", (clamResponse.second as ClamClientAuthResponse).token)
+                    })
+                    .body(
                     activeClient.createResponse()
                 )
             }
@@ -269,20 +278,20 @@ class ClientServiceImpl @Autowired constructor(
             val clientId = req.queryPathVariable["client-id"]
                 ?: throw ClmException(message = "The client-id header is missing!")
             val client = clientRepository.findByClientId(clientId)
-                ?: return ResponseEntity.badRequest().body(
+                ?: return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
                     ClmStatusResponse().apply {
                         message = ClientActionMessageCode.CLIENT_NOT_FOUND.toString()
-                        status = HttpStatus.BAD_REQUEST.value()
+                        status = HttpStatus.NOT_FOUND.value()
                     }
                 )
             return ResponseEntity.ok().body(
-                client.createResponse()
+                client.createResponse() as ClmClientGetResponse
             )
         } catch (exception: ClmException) {
             return ResponseEntity.internalServerError().body(
                 ClmStatusResponse().apply {
                     message = exception.message!!
-                    status = HttpStatus.BAD_REQUEST.value()
+                    status = HttpStatus.INTERNAL_SERVER_ERROR.value()
                 }
             )
         } catch (exception: Exception) {
@@ -357,13 +366,13 @@ class ClientServiceImpl @Autowired constructor(
                     id = waitingClient.id
                     status = AmndState.WAITING
                     login = waitingClient.login
-                    personalInfo = PersonalInfo.PersonalInfoCreate().apply {
+                    personalInfo = PersonalInfo().apply {
                         surname = waitingClient.surname
                         name = waitingClient.name
                         patronymic = waitingClient.patronymic
                         birthDate = waitingClient.birthDate
                     }
-                    contacts = Contacts.ContactsCreate().apply {
+                    contacts = Contacts().apply {
                         phone = waitingClient.phoneNumber
                         email = waitingClient.emailAddress
                     }
@@ -495,7 +504,7 @@ class ClientServiceImpl @Autowired constructor(
         }
         updateReq.contacts?.let {
             it.phone?.let { phone -> updateClient.phoneNumber = phone }
-            it.email?.let { email ->
+            it.email.let { email ->
                 updateClient.emailAddress = email
                 updateClient.amndState = AmndState.WAITING
             }
@@ -513,11 +522,11 @@ class ClientServiceImpl @Autowired constructor(
     private fun ClmClientCreateRequest.createClient(): Client {
         return Client().apply {
             login = this@createClient.login
-            surname = this@createClient.personalInfo.surname
-            name = this@createClient.personalInfo.name
+            surname = personalInfo.surname.toString()
+            name = personalInfo.name.toString()
             patronymic = this@createClient.personalInfo.patronymic
             phoneNumber = this@createClient.contacts.phone
-            emailAddress = this@createClient.contacts.email
+            emailAddress = contacts.email
             city = this@createClient.location?.city
             birthDate = this@createClient.personalInfo.birthDate
         }

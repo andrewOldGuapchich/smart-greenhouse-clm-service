@@ -40,10 +40,14 @@ class ClmRestClient @Autowired constructor(
             }
             println("Raw response - Status: ${rs.statusCode}, Body: ${rs.body}")
 
-            val resolvedBody = resolveBody(rs)
-            println("Resolved body: $resolvedBody")
-
-            return Pair(rs.statusCode, resolvedBody)
+            return Pair(
+                first = rs.statusCode,
+                second = if(rs.statusCode.is2xxSuccessful) {
+                    mapper.readValue(rs.body, ClamClientCreateResponse::class.java)
+                } else {
+                    mapper.readValue(rs.body, ClamStatusResponse::class.java)
+                }
+            )
         } catch (e: Exception) {
             throw Exception(e.message)
         }
@@ -59,7 +63,11 @@ class ClmRestClient @Autowired constructor(
             }
             return Pair(
                 first = rs.statusCode,
-                second = resolveBody(rs)
+                second = if(rs.statusCode.is2xxSuccessful) {
+                    mapper.readValue(rs.body, ClamClientAuthResponse::class.java)
+                } else {
+                    mapper.readValue(rs.body, ClamStatusResponse::class.java)
+                }
             )
         } catch (e: ClmException) {
             throw ClmException(e.message!!)
