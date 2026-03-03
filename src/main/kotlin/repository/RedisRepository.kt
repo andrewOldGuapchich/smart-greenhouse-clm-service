@@ -1,6 +1,6 @@
 package com.andrew.smart_greenhouse.clm.repository
 
-import greenhouse_api.clm_model.model.RedisMessage
+import greenhouse_api.clm_model.entity.RedisMessage
 import org.slf4j.Logger
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.data.redis.core.StringRedisTemplate

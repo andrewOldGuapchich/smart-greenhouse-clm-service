@@ -1,11 +1,12 @@
 package com.andrew.smart_greenhouse.clm.util.rest
 
 import clam_model.dto.*
-import com.andrew.smart_greenhouse.clm.util.exception.ClmException
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import greenhouse_api.util.exception.ClmException
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
@@ -26,6 +27,7 @@ class ClmRestClient @Autowired constructor(
         registerModule(JavaTimeModule())
         disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
     }
+    private var logger = LoggerFactory.getLogger(ClmRestClient::class.java)
 
     @RequestPath(value = "/clam/api/v1/clients")
     fun createClamClientSendReq(rq: ClamRequest): Pair<HttpStatus, ClamResponse?> {
@@ -56,11 +58,13 @@ class ClmRestClient @Autowired constructor(
     @RequestPath(value = "/clam/api/v1/clients/{client-id}/activate")
     fun activateClamClientSendReq(clientId: String): Pair<HttpStatus, ClamResponse?> {
         try {
+            logger.info("Send /clam/api/v1/clients/$clientId/activate")
             currentPath = currentPath.replace("{client-id}", clientId)
             val rs = restHandler.post<ClamRequest> {
                 endpoint = pathBuilder()
-                port = 20101
+                port = 1125
             }
+            logger.info("Response: ${rs.body}")
             return Pair(
                 first = rs.statusCode,
                 second = if(rs.statusCode.is2xxSuccessful) {

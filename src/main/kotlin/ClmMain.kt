@@ -3,11 +3,11 @@ package com.andrew.smart_greenhouse.clm
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.autoconfigure.domain.EntityScan
 import org.springframework.boot.runApplication
-import org.springframework.cloud.client.discovery.EnableDiscoveryClient
+//import org.springframework.cloud.client.discovery.EnableDiscoveryClient
 
 @SpringBootApplication
 @EntityScan("greenhouse_api.clm_model.entity")
-@EnableDiscoveryClient
+//@EnableDiscoveryClient
 class ClmMain
 fun main(args: Array<String>){
     runApplication<ClmMain>(*args)

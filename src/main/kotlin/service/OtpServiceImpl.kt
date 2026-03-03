@@ -1,8 +1,8 @@
-package com.andrew.smart_greenhouse.clm.service.impl
+package com.andrew.smart_greenhouse.clm.service
 
 import com.andrew.smart_greenhouse.clm.repository.RedisRepository
-import greenhouse_api.clm_model.model.Payload
-import greenhouse_api.clm_model.model.RedisMessage
+import greenhouse_api.clm_model.entity.Payload
+import greenhouse_api.clm_model.entity.RedisMessage
 import greenhouse_api.clm_service.OtpService
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service

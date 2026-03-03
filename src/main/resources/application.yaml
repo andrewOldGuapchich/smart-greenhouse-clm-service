@@ -11,7 +11,7 @@ spring:
   application:
     name: greenhouse-clm
   datasource:
-    url: jdbc:postgresql://localhost:5432/clm_db
+    url: jdbc:postgresql://localhost:5432/clm
     username: garden
     password: garden
     driver-class-name: org.postgresql.Driver
@@ -46,10 +46,11 @@ kafka:
 logging:
   level:
     org.hibernate.SQL: DEBUG
-    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
-    org.springframework.web: TRACE
-    org.springframework.web.reactive.function.client: TRACE
-    greenhouse_api.clm_service: TRACE
+    org.hibernate.type.descriptor.sql.BasicBinder: INFO
+    org.springframework.web: INFO
+    org.springframework.web.reactive.function.client: INFO
+    greenhouse_api.clm_service: INFO
+    org.springframework.cloud: INFO
 
 rest:
   base-url: localhost
@@ -71,24 +72,3 @@ management:
     web:
       exposure:
         include: "*"
-
-#management:
-#  endpoints:
-#    web:
-#      exposure:
-#        include: health,info
-#      base-path: /actuator
-#  endpoint:
-#    health:
-#      show-details: always
-#    info:
-#      enabled: true
-#    gateway:
-#      enabled: true
-#info:
-#  app:
-#    name: ${spring.application.name}
-#    version: 1.0.0
-#    description: API Gateway Service
-#  environment: development
-#  team: Smart Greenhouse Team
