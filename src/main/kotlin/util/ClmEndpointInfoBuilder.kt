@@ -25,7 +25,7 @@ class ClmEndpointInfoBuilder {
         logger.info("Endpoints: ${serviceInfo.apiInfo}")
     }
 
-    fun build(): ServiceEndpoint {
+    private fun build(): ServiceEndpoint {
         val infoList: MutableList<RestApiInfo> = mutableListOf()
         val clmServiceClass = ClientService::class
 
