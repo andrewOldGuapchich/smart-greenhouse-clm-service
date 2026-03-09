@@ -5,6 +5,12 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import greenhouse_api.clam_model.dto.rq.ClamClientCreateRequest
+import greenhouse_api.clam_model.dto.rq.ClamCredentialCreateRequest
+import greenhouse_api.clam_model.dto.rs.ClamClientResponse
+import greenhouse_api.clam_model.dto.rs.ClamCredentialResponse
+import greenhouse_api.clam_model.dto.rs.ClamResponse
+import greenhouse_api.clam_model.dto.rs.ClamStatusResponse
 import greenhouse_api.util.exception.ClmException
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
@@ -29,76 +35,35 @@ class ClmRestClient @Autowired constructor(
     }
     private var logger = LoggerFactory.getLogger(ClmRestClient::class.java)
 
-    @RequestPath(value = "/clam/api/v1/clients")
-    fun createClamClientSendReq(rq: ClamRequest): Pair<HttpStatus, ClamResponse?> {
+    @RequestPath("/clam/api/v1/clients")
+    fun clamCredCreateRequest(clamRequest: ClamClientCreateRequest): Pair<HttpStatus, ClamResponse> {
         try {
-            println("Sending request to: ${pathBuilder()}")
-            println("Request body: ${mapper.writeValueAsString(rq)}")
-
-            val rs = restHandler.post<ClamRequest> {
+            val rs = restHandler.post<Any?> {
                 endpoint = pathBuilder()
+                requestBody = clamRequest
                 port = 20101
-                requestBody = rq as ClamClientCreateRequest
             }
-            println("Raw response - Status: ${rs.statusCode}, Body: ${rs.body}")
-
+            if (rs.body == null || rs.body.toString().isBlank()) {
+                throw IllegalStateException("Empty response from CLM service")
+            }
             return Pair(
                 first = rs.statusCode,
-                second = if(rs.statusCode.is2xxSuccessful) {
-                    mapper.readValue(rs.body, ClamClientCreateResponse::class.java)
+                second = if (rs.statusCode.is2xxSuccessful) {
+                    try {
+                        mapper.readValue(rs.body, ClamClientResponse::class.java)
+                    } catch (e: Exception) {
+                        logger.error("Failed to parse successful response: {}", e.message)
+                        mapper.readValue(rs.body, ClamStatusResponse::class.java)
+                    }
                 } else {
                     mapper.readValue(rs.body, ClamStatusResponse::class.java)
                 }
             )
         } catch (e: Exception) {
-            throw Exception(e.message)
-        }
-    }
-
-    @RequestPath(value = "/clam/api/v1/clients/{client-id}/activate")
-    fun activateClamClientSendReq(clientId: String): Pair<HttpStatus, ClamResponse?> {
-        try {
-            logger.info("Send /clam/api/v1/clients/$clientId/activate")
-            currentPath = currentPath.replace("{client-id}", clientId)
-            val rs = restHandler.post<ClamRequest> {
-                endpoint = pathBuilder()
-                port = 1125
-            }
-            logger.info("Response: ${rs.body}")
-            return Pair(
-                first = rs.statusCode,
-                second = if(rs.statusCode.is2xxSuccessful) {
-                    mapper.readValue(rs.body, ClamClientAuthResponse::class.java)
-                } else {
-                    mapper.readValue(rs.body, ClamStatusResponse::class.java)
-                }
-            )
-        } catch (e: ClmException) {
-            throw ClmException(e.message!!)
+            logger.error("Unexpected error in CLAM client", e)
+            throw ClmException("CLAM service error: ${e.message}")
         }
     }
 
     private fun pathBuilder(): String = "$prefix$currentPath"
-
-    private fun resolveBody(rs: HttpResponse): ClamResponse? {
-        return try {
-            when {
-                rs.statusCode.is2xxSuccessful -> {
-                    if (rs.body!!.isNotBlank()) {
-                        mapper.readValue(rs.body, ClamStatusResponse::class.java)
-                    } else {
-                        null
-                    }
-                }
-                else -> {
-                    mapper.readValue(rs.body, ClamStatusResponse::class.java)
-                }
-            }
-        } catch (e: Exception) {
-            ClamStatusResponse().apply {
-                message = "Failed to parse response: ${e.message}"
-                status = rs.statusCode.value()
-            }
-        }
-    }
 }

@@ -52,6 +52,10 @@ logging:
     greenhouse_api.clm_service: INFO
     org.springframework.cloud: INFO
 
+secret:
+  keys:
+    path: src/main/resources/keys
+
 rest:
   base-url: localhost
   base-prefix: /smart-greenhouse/internal

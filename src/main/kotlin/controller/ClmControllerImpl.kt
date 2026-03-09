@@ -81,6 +81,8 @@ class ClmControllerImpl @Autowired constructor(
             )
         } catch (e: ClmIllegalArgumentException) {
             createBadRequest(e.message!!)
+        } catch (e: ClmNotExistObjectException) {
+            createNotFound(e.message!!)
         } catch (e: ClmAlreadyExistObject) {
             createBadRequest(e.message!!)
         } catch (e: ClmException) {
@@ -90,10 +92,6 @@ class ClmControllerImpl @Autowired constructor(
 
     @PatchMapping("/v1/clients/{client-id}")
     fun updateClmClient(
-        @RequestHeader("X-IsAuth")
-        xAuth: String,
-        @RequestHeader("X-ClientId")
-        xClientId: String,
         @PathVariable("client-id")
         clientId: String,
         @RequestBody
@@ -102,8 +100,7 @@ class ClmControllerImpl @Autowired constructor(
         return try {
             createOk(
                 clientService.updateClmClient(
-                    req = ClmControllerRequestDto(
-                        headers = mutableMapOf("X-IsAuth" to xAuth, "X-ClientId" to xClientId), body = req,
+                    req = ClmControllerRequestDto( body = req,
                         queryPathVariable = mutableMapOf("client-id" to clientId)
                     )
                 )
@@ -151,8 +148,6 @@ class ClmControllerImpl @Autowired constructor(
 //
     @DeleteMapping("/v1/clients/{client-id}")
     fun deleteClmClient(
-        @RequestHeader
-        httpHeaders: Map<String, String>,
         @PathVariable("client-id")
         clientId: String
     ) : ResponseEntity<ClmResponse> {
@@ -175,10 +170,6 @@ class ClmControllerImpl @Autowired constructor(
 
     @GetMapping("/v1/clients/{client-id}")
     fun getClmClient(
-        @RequestHeader("X-IsAuth")
-        xAuth: String,
-        @RequestHeader("X-ClientId")
-        xClientId: String,
         @PathVariable("client-id")
         clientId: String
     ) : ResponseEntity<ClmResponse> {
@@ -186,7 +177,6 @@ class ClmControllerImpl @Autowired constructor(
             createOk(
                 clientService.getClmClient(
                     req = ClmControllerRequestDto(
-                        headers = mutableMapOf("X-IsAuth" to xAuth, "X-ClientId" to xClientId),
                         queryPathVariable = mutableMapOf("client-id" to clientId)
                     )
                 )

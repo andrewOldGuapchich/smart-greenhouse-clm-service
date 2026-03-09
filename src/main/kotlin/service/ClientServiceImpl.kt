@@ -4,10 +4,16 @@ import com.andrew.smart_greenhouse.clm.repository.ClientRepository
 import com.andrew.smart_greenhouse.clm.util.kafka.ClmKafkaProducer
 import com.andrew.smart_greenhouse.clm.util.mapper.copy
 import com.andrew.smart_greenhouse.clm.util.mapper.toCreateStreamingMessage
+import com.andrew.smart_greenhouse.clm.util.mapper.toStreamingAmndState
 import com.andrew.smart_greenhouse.clm.util.mapper.update
+import com.andrew.smart_greenhouse.clm.util.rest.ClmRestClient
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import greenhouse_api.clam_model.dto.ClamEntityState
+import greenhouse_api.clam_model.dto.ClientDto
+import greenhouse_api.clam_model.dto.rq.ClamClientCreateRequest
+import greenhouse_api.clam_model.dto.rs.ClamStatusResponse
 import greenhouse_api.clm_controller.*
 import greenhouse_api.clm_model.dto.ClmDto
 import greenhouse_api.clm_model.dto.LocationDto
@@ -17,6 +23,7 @@ import greenhouse_api.clm_model.dto.rq.ClmClientUpdateRequest
 import greenhouse_api.clm_model.entity.AmndState
 import greenhouse_api.clm_model.entity.Client
 import greenhouse_api.clm_service.*
+import greenhouse_api.util.ClamException
 import greenhouse_api.util.exception.ClmAlreadyExistObject
 import greenhouse_api.util.exception.ClmException
 import greenhouse_api.util.exception.ClmIllegalArgumentException
@@ -28,7 +35,9 @@ import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service
 import streamig_api.clm.OtpSendKafkaMessage
+import streamig_api.common.ActiveDate
 import streamig_api.common.ContentType
+import streamig_api.common.ObjectState
 import streamig_api.common.Topic
 import java.time.LocalDateTime
 
@@ -38,6 +47,7 @@ class ClientServiceImpl @Autowired constructor(
     private val locationService: LocationService,
     private val otpService: OtpService,
     private val kafkaProducer: ClmKafkaProducer,
+    private val restClient: ClmRestClient,
     private val clmInternalMapper: ClmInternalMapper
 ): ClientService {
     private val logger = LoggerFactory.getLogger(ClientService::class.java)
@@ -84,12 +94,32 @@ class ClientServiceImpl @Autowired constructor(
         logger.info("Kafka message: $clientCreateStreaming")
 
         //send CLAM-message
-        kafkaProducer.sendMessage(
-            Topic.ClmOutgoing,
-            clientCreateStreaming.hashCode().toString(),
-            clientCreateStreaming,
-            mapOf("ContentType" to ContentType.ClientCreate.toString())
-        )
+        val clamResponse = restClient.clamCredCreateRequest(ClamClientCreateRequest(
+            client = ClientDto(id = newClient.id.id,
+                clientState = ClamEntityState(
+                    amndState = greenhouse_api.clam_model.entity.AmndState.WAITING,
+                    lastUpdated = newClient.amndDate,
+                    originalDate = newClient.originalDate,
+                    activeDate = greenhouse_api.clam_model.dto.ActiveDate(
+                        to = newClient.activeDateTo,
+                        from = newClient.activeDateFrom
+                    ),
+                    prevVersion = newClient.prevVersion,
+                    version = newClient.id.version
+                )
+            )
+        ))
+
+        if(!clamResponse.first.is2xxSuccessful)
+            throw ClamException((clamResponse.second as ClamStatusResponse).message)
+
+        //saga
+//        kafkaProducer.sendMessage(
+//            Topic.ClmOutgoing,
+//            clientCreateStreaming.hashCode().toString(),
+//            clientCreateStreaming,
+//            mapOf("ContentType" to ContentType.ClientCreate.toString())
+//        )
 
         //send NTM-message
         val generateOtp = otpService.generateOtp()
@@ -135,10 +165,8 @@ class ClientServiceImpl @Autowired constructor(
         logger.info("Client id ${activeClient.id.id}")
         otpService.delete(clientId)
 
-        //save clients
         try {
             val savedActiveClient= save(activeClient)
-            //send CLAM kafka-message
             val clientActivateStreaming = objectMapper.writeValueAsString(activeClient.toCreateStreamingMessage())
             logger.info("Activation. Kafka message: $clientActivateStreaming")
 
@@ -146,7 +174,7 @@ class ClientServiceImpl @Autowired constructor(
                 Topic.ClmOutgoing,
                 clientActivateStreaming.hashCode().toString(),
                 clientActivateStreaming,
-                mapOf("ContentType" to ContentType.ClientUpdate.toString())
+                mapOf("ContentType" to ContentType.ClientActivation.toString())
             )
 
             save(waitingClient)
